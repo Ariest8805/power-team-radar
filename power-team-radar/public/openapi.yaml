@@ -1,0 +1,136 @@
+openapi: 3.1.0
+info:
+  title: Power Team Opportunity Radar API
+  version: "1.0.0"
+servers:
+  - url: https://example.com   # 先占位；部署后会改成你的 Vercel 域名
+paths:
+  /api/opportunities/search:
+    post:
+      operationId: searchOpportunities
+      summary: Search recent business opportunities for Power Team
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                industries:
+                  type: array
+                  items: { type: string }
+                locations:
+                  type: array
+                  items: { type: string }
+                min_budget_rm:
+                  type: number
+                language:
+                  type: string
+                  enum: [en, ms, zh]
+                time_range_days:
+                  type: integer
+                limit:
+                  type: integer
+                  default: 10
+              required: [industries, time_range_days]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        summary: { type: string }
+                        url: { type: string }
+                        published_at: { type: string, format: date-time }
+                        score: { type: number }
+                        matched_industries:
+                          type: array
+                          items: { type: string }
+                        location: { type: string }
+                        signals:
+                          type: array
+                          items: { type: string }
+                        suggested_members:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: { type: string }
+                              specialty: { type: string }
+                              chapter_role: { type: string }
+                        opening_line: { type: string }
+
+  /api/opportunities/subscribe:
+    post:
+      operationId: subscribeRules
+      summary: Save subscription rules for scheduled digests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                power_team: { type: string }
+                rule_name: { type: string }
+                industries:
+                  type: array
+                  items: { type: string }
+                locations:
+                  type: array
+                  items: { type: string }
+                time_range_days: { type: integer }
+                notify_channel:
+                  type: string
+                  enum: [whatsapp, email, none]
+                notify_target: { type: string }
+                send_time_local: { type: string }
+                timezone: { type: string, default: Asia/Kuala_Lumpur }
+              required: [rule_name, industries, time_range_days]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  subscription_id: { type: string }
+
+  /api/notify/whatsapp:
+    post:
+      operationId: pushWhatsapp
+      summary: Push selected opportunities to WhatsApp (mock in MVP)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items: { type: string }
+                recipient: { type: string }
+                template: { type: string }
+              required: [items, recipient]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  count: { type: integer }
