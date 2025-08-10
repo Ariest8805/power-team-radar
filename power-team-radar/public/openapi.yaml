@@ -3,7 +3,7 @@ info:
   title: Power Team Opportunity Radar API
   version: "1.0.0"
 servers:
-  - url: https://example.com   # 先占位；部署后会改成你的 Vercel 域名
+  - url: https://power-team-radar.vercel.app
 paths:
   /api/opportunities/search:
     post:
@@ -134,3 +134,4 @@ paths:
                 properties:
                   status: { type: string }
                   count: { type: integer }
+
