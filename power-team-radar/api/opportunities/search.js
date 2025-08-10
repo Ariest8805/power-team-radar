@@ -1,4 +1,3 @@
-import { health_keywords } from "../_config/keywords.js";
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -87,6 +86,7 @@ export default async function handler(req, res) {
 
   res.status(200).json({ items });
 }
+
 
 
 
