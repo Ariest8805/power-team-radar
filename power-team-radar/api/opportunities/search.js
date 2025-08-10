@@ -14,52 +14,54 @@ export default async function handler(req, res) {
   // 假数据池（先够你演示；下一步我会教你对接真实 RSS/News）
   const now = new Date();
   const fake = [
-    {
-      id: "opp_kl_fitout_001",
-      title: "KL mall announces new wing fit-out (Q4)",
-      summary: "Major retail mall expanding; seeking renovation, M&E, signage vendors.",
-      url: "https://news.example.com/kl-fitout",
-      published_at: now.toISOString(),
-      budget_rm: 500000,
-      matched_industries: ["renovation","interior design"],
-      location: "Kuala Lumpur",
-      signals: ["expansion","fit-out","Q4"],
-      suggested_members: [
-        { name: "Alice Tan", specialty: "Commercial Renovation", chapter_role: "Contractor" }
-      ],
-      opening_line: "嗨，我这边刚好有商场新翼装潢项目，你们团队是否有空档承接 Q4 fit-out？"
-    },
-    {
-      id: "opp_selangor_office_002",
-      title: "Selangor tech startup relocating HQ",
-      summary: "Tech firm moving to bigger office; needs ID, cabling, partition.",
-      url: "https://news.example.com/sg-office",
-      published_at: new Date(now.getTime() - 2*86400000).toISOString(),
-      budget_rm: 180000,
-      matched_industries: ["interior design","network cabling"],
-      location: "Selangor",
-      signals: ["relocation","fit-out"],
-      suggested_members: [
-        { name: "Ben Lee", specialty: "Office ID", chapter_role: "Designer" }
-      ],
-      opening_line: "听说你们擅长办公室快速交付，这家科技公司要迁 HQ，或许适合你。"
-    },
-    {
-      id: "opp_penang_chain_003",
-      title: "Penang F&B chain to open 3 outlets",
-      summary: "Local brand expanding; looking for renovation, signage, kitchen equipment.",
-      url: "https://news.example.com/pg-fnb",
-      published_at: new Date(now.getTime() - 3*86400000).toISOString(),
-      budget_rm: 250000,
-      matched_industries: ["renovation","signage"],
-      location: "Penang",
-      signals: ["expansion","multi-outlet"],
-      suggested_members: [
-        { name: "Chong", specialty: "F&B Fitout", chapter_role: "Contractor" }
-      ],
-      opening_line: "这家连锁 F&B 计划 3 家新店，建议你先聊聊厨房与门头招牌标准化。"
-    }
-  ];
+  {
+    id: "opp_kl_corpwellness_001",
+    title: "KL科技园区发起 Q4 Corporate Wellness Program",
+    summary: "园区计划为500名员工推进为期3个月的企业健康计划，包含健康讲座、体测与营养咨询，欢迎健康服务供应商对接。",
+    url: "https://news.example.com/kl-corpwellness",
+    published_at: now.toISOString(),
+    budget_rm: 120000,
+    matched_industries: ["corporate wellness","nutrition","health screening"],
+    location: "Kuala Lumpur",
+    signals: ["corporate wellness program","Q4","RFP"],
+    suggested_members: [
+      { name: "Ariest", specialty: "Supplements & Wellness Coach", chapter_role: "Health & Wellness" },
+      { name: "Jess", specialty: "Health Screening", chapter_role: "Medical Lab" }
+    ],
+    opening_line: "你好，我这边看到你们在规划企业健康计划，我们有完整的讲座+体测+营养方案，可以聊聊贵司员工画像与KPI吗？"
+  },
+  {
+    id: "opp_sgr_newclinic_002",
+    title: "Selangor PJ 地区即将开设多专科诊所",
+    summary: "新诊所预计 11 月开张，寻求体检合作与企业客户导入，优先考虑已具备企业福利方案的团队。",
+    url: "https://news.example.com/pj-clinic",
+    published_at: new Date(now.getTime()-86400000).toISOString(),
+    budget_rm: 80000,
+    matched_industries: ["health screening","dental clinic","wellness center"],
+    location: "Selangor",
+    signals: ["new branch","opening","panel clinic"],
+    suggested_members: [
+      { name: "Ben", specialty: "Corporate Panel Setup", chapter_role: "Insurance/TPA" }
+    ],
+    opening_line: "恭喜新院开业！我们可协助企业体检与面向 HR 的福利方案，一起做开业联合活动？"
+  },
+  {
+    id: "opp_pg_healthtalk_003",
+    title: "Penang 工厂 Q3-Q4 连续健康讲座招募讲师",
+    summary: "围绕睡眠、压力管理、营养与关节保养四大主题，每月一场，为200名生产线员工。",
+    url: "https://news.example.com/pg-healthtalk",
+    published_at: new Date(now.getTime()-2*86400000).toISOString(),
+    budget_rm: 30000,
+    matched_industries: ["nutrition","physiotherapy","supplements"],
+    location: "Penang",
+    signals: ["health talk","CSR health","employee wellness"],
+    suggested_members: [
+      { name: "Chong", specialty: "Physiotherapy Ergonomics", chapter_role: "Physio" }
+    ],
+    opening_line: "你们健康讲座主题我们都有现成教材，是否先安排一场试点？我们可连带做员工风险筛查。"
+  }
+];
+
 
   // 简单过滤逻辑
   const withinDays = (iso, days) => {
@@ -84,3 +86,4 @@ export default async function handler(req, res) {
 
   res.status(200).json({ items });
 }
+
