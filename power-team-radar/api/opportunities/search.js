@@ -1,24 +1,24 @@
 // api/opportunities/search.js
-// 多数据源：Google News RSS（免token） + Eventbrite（可选） + Facebook Page（可选） + LinkedIn Org（可选）
-// 环境变量（Vercel → Settings → Environment Variables）可选：
-//   EVENTBRITE_TOKEN
-//   FB_PAGE_IDS            例： "1234567890,9876543210"
-//   FB_TOKEN               例： "EAAG..."（页面读取用）
-//   LINKEDIN_ORG_IDS       例： "123456,789012"
-//   LINKEDIN_TOKEN         例： "AQX..."
-// 端点：POST /api/opportunities/search
+// ✅ 多数据源（全部免 Token，立即可测）
+//    - Google News RSS
+//    - Bing News RSS
+//    - Eventbrite 公共 RSS（KL 健康主题）
+//    - The Star Health RSS
+//    - Malay Mail Life/Health RSS
+//    - Meetup 公共 RSS（KL + health）
+// ✅ 统一去重 / 过滤（近 N 天）/ 打分 / 排序
+// ✅ 端点：POST /api/opportunities/search
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const {
-      industries = [],              // ["corporate wellness","nutrition",...]
-      locations = [],               // ["Kuala Lumpur","Selangor",...]
-      min_budget_rm,                // 目前不做硬过滤
+      industries = [],               // ["corporate wellness","nutrition",...]
+      locations = [],                // ["Kuala Lumpur","Selangor",...]
       time_range_days = 7,
       limit = 5,
-      language = "en"               // "en" | "zh" | "ms"
+      language = "en"                // "en" | "zh" | "ms"
     } = req.body || {};
 
     // ---------- 关键词 & 触发词 ----------
@@ -31,13 +31,11 @@ export default async function handler(req, res) {
       "new clinic","new branch","grand opening","expansion","relocation",
       "RFP","tender","invitation to bid","panel clinic","TPA panel","insurance panel"
     ];
-
     const signal_keywords = [
       "opening","grand opening","new branch","expansion","relocation",
       "tender","RFP","invitation to bid","corporate wellness program",
       "health talk","CSR health","panel clinic","insurance panel","TPA panel"
     ];
-
     const role_map = {
       "nutrition": ["Wellness Coach","Dietitian","Supplements"],
       "corporate wellness": ["Wellness Coach","Health Screening"],
@@ -48,49 +46,50 @@ export default async function handler(req, res) {
       "supplements": ["Supplements","Wellness Coach"]
     };
 
-    // ---------- 汇总关键词、地点 ----------
+    // ---------- 检索组合 ----------
     const langCode = language === "zh" ? "zh" : "en";
     const country = "MY";
-    const baseKws = uniq([...health_keywords, ...industries]);         // 让 industries 参与检索
-    const searchKws = baseKws.slice(0, 6).join(" OR ");                // 控制长度
+    const baseKws = uniq([...health_keywords, ...industries]);
+    const searchKwsShort = baseKws.slice(0, 6).join(" OR ");
     const geoList = locations.length ? locations : ["Malaysia"];
-
-    // ---------- 并发抓取多数据源 ----------
     const sinceIso = isoDaysAgo(time_range_days);
 
+    // ---------- 并发抓取（免 Token 源） ----------
     const tasks = [];
 
-    // Google News（免token）
+    // Google News
     for (const loc of geoList) {
-      tasks.push(fetchFromGoogleNews({ kws: searchKws, loc, langCode, country })
-        .catch(() => []));
+      tasks.push(fetchFromGoogleNews({ kws: searchKwsShort, loc, langCode, country }).catch(() => []));
     }
 
-    // Eventbrite（需 token，可选）
-    if (process.env.EVENTBRITE_TOKEN) {
-      for (const loc of geoList) {
-        tasks.push(fetchFromEventbrite({ kws: baseKws.slice(0,3).join(" "), location: loc, sinceIso })
-          .catch(() => []));
-      }
+    // Bing News
+    for (const loc of geoList) {
+      tasks.push(fetchFromBingNews({ kws: searchKwsShort, loc }).catch(() => []));
     }
 
-    // Facebook 公共专页（需 page ids + token，可选）
-    if (process.env.FB_PAGE_IDS && process.env.FB_TOKEN) {
-      const pageIds = process.env.FB_PAGE_IDS.split(",").map(s => s.trim()).filter(Boolean);
-      tasks.push(fetchFromFacebookPages({ pageIds, sinceIso }).catch(() => []));
+    // Eventbrite 公共 RSS（KL 健康主题；如果传别的城市，就简单替换）
+    const ebCities = geoList.includes("Kuala Lumpur") ? ["Kuala Lumpur"] : geoList;
+    for (const city of ebCities) {
+      tasks.push(fetchFromEventbritePublicRss({ city }).catch(() => []));
     }
 
-    // LinkedIn 公司页（需 org ids + token，可选；注意权限）
-    if (process.env.LINKEDIN_ORG_IDS && process.env.LINKEDIN_TOKEN) {
-      const orgIds = process.env.LINKEDIN_ORG_IDS.split(",").map(s => s.trim()).filter(Boolean);
-      tasks.push(fetchFromLinkedInOrgs({ orgIds, sinceIso }).catch(() => []));
+    // The Star Health（专栏 RSS）
+    tasks.push(fetchFromTheStarHealth().catch(() => []));
+
+    // Malay Mail Life（包含健康）
+    tasks.push(fetchFromMalayMailLife().catch(() => []));
+
+    // Meetup（KL + health 的公共 RSS）
+    const meetupCities = geoList.includes("Kuala Lumpur") ? ["Kuala Lumpur"] : geoList;
+    for (const city of meetupCities) {
+      tasks.push(fetchFromMeetup({ city, keyword: "health" }).catch(() => []));
     }
 
     const results = await Promise.all(tasks);
     let items = results.flat();
 
     // ---------- 去重 / 过滤 / 打分 ----------
-    items = uniqBy(items, x => x.url || (x.title + x.published_at));
+    items = uniqBy(items, x => x.url || (x.title + (x.published_at || "")));
 
     items = items.filter(x => daysBetween(x.published_at) <= time_range_days);
 
@@ -98,11 +97,12 @@ export default async function handler(req, res) {
       const text = `${x.title || ""} ${x.summary || ""}`.toLowerCase();
       const kwHits = countHits(text, health_keywords);
       const signals = signal_keywords.filter(k => text.includes(k.toLowerCase()));
-      const locationMatch = geoList.length === 1 && geoList[0] !== "Malaysia"
-        ? (x.location && geoList.includes(x.location))
-        : true; // 有明确城市时更严格
+      const locMatch = locations.length
+        ? (x.location && locations.map(s=>s.toLowerCase()).includes(x.location.toLowerCase()))
+        : true;
       const daysAge = daysBetween(x.published_at);
-      const score = scoreItem({ locationMatch, signalsCount: signals.length, daysAge, kwHits });
+      const score = scoreItem({ locationMatch: locMatch, signalsCount: signals.length, daysAge, kwHits });
+
       return {
         ...x,
         score,
@@ -141,7 +141,7 @@ export default async function handler(req, res) {
   }
 }
 
-/* ========================= 数据源实现 ========================= */
+/* ====================== 各数据源实现（免 Token） ====================== */
 
 // Google News RSS
 async function fetchFromGoogleNews({ kws, loc, langCode, country }) {
@@ -153,7 +153,6 @@ async function fetchFromGoogleNews({ kws, loc, langCode, country }) {
     gl: country,
     ceid: `${country}:${langCode}`
   }).toString();
-
   const rss = await fetchRss(url);
   return rss.map(r => ({
     source: "google_news",
@@ -165,112 +164,102 @@ async function fetchFromGoogleNews({ kws, loc, langCode, country }) {
   }));
 }
 
-// Eventbrite（需要 EVENTBRITE_TOKEN）
-async function fetchFromEventbrite({ kws, location, sinceIso }) {
-  const token = process.env.EVENTBRITE_TOKEN;
-  if (!token) return [];
-  const url = "https://www.eventbriteapi.com/v3/events/search/?" + new URLSearchParams({
-    q: kws,
-    "location.address": location,
-    "start_date.range_start": sinceIso,
-    sort_by: "date"
-  }).toString();
-
-  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` }});
-  if (!resp.ok) throw new Error("Eventbrite API error " + resp.status);
-  const data = await resp.json();
-  const events = data.events || [];
-  return events.map(ev => ({
-    source: "eventbrite",
-    title: ev.name?.text || "Eventbrite Event",
-    summary: ev.description?.text?.slice(0, 300) || "",
-    url: ev.url,
-    published_at: ev.start?.utc || ev.created || new Date().toISOString(),
-    location: location
+// Bing News RSS（超宽松）
+async function fetchFromBingNews({ kws, loc }) {
+  // e.g. https://www.bing.com/news/search?q=health+Malaysia&format=RSS
+  const query = encodeURIComponent(`${kws.replace(/\\s+OR\\s+/g, " ").replace(/\\(|\\)/g,"")} ${loc}`);
+  const url = `https://www.bing.com/news/search?q=${query}&format=RSS`;
+  const rss = await fetchRss(url);
+  return rss.map(r => ({
+    source: "bing_news",
+    title: r.title,
+    summary: r.description?.slice(0, 300) || "",
+    url: r.link,
+    published_at: r.pubDate,
+    location: loc
   }));
 }
 
-// Facebook 公共专页（需要 FB_PAGE_IDS + FB_TOKEN）
-async function fetchFromFacebookPages({ pageIds, sinceIso }) {
-  const token = process.env.FB_TOKEN;
-  if (!token || !pageIds?.length) return [];
-  const out = [];
-  for (const id of pageIds) {
-    const url = `https://graph.facebook.com/v20.0/${id}/posts?` + new URLSearchParams({
-      fields: "message,created_time,permalink_url",
-      since: Math.floor(new Date(sinceIso).getTime() / 1000)  // unix秒
-    }).toString();
-    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` }});
-    if (!resp.ok) continue;
-    const data = await resp.json();
-    const posts = data.data || [];
-    for (const p of posts) {
-      out.push({
-        source: "facebook_page",
-        title: (p.message || "").split("\n")[0].slice(0, 100) || "Facebook Post",
-        summary: p.message?.slice(0, 300) || "",
-        url: p.permalink_url,
-        published_at: p.created_time,
-        location: null
-      });
-    }
-  }
-  return out;
+// Eventbrite 公共 RSS（城市健康主题）
+async function fetchFromEventbritePublicRss({ city }) {
+  // KL 健康类公共 RSS（其它城市可尝试替换 city 名）
+  const citySlug = (city || "Kuala Lumpur").toLowerCase().replace(/\\s+/g, "-");
+  const url = `https://www.eventbrite.com/d/malaysia--${encodeURIComponent(citySlug)}/health--events/rss/`;
+  const rss = await fetchRss(url);
+  return rss.map(r => ({
+    source: "eventbrite_rss",
+    title: r.title,
+    summary: r.description?.slice(0, 300) || "",
+    url: r.link,
+    published_at: r.pubDate,
+    location: city
+  }));
 }
 
-// LinkedIn 公司页（需要 LINKEDIN_ORG_IDS + LINKEDIN_TOKEN；权限较严格）
-async function fetchFromLinkedInOrgs({ orgIds, sinceIso }) {
-  const token = process.env.LINKEDIN_TOKEN;
-  if (!token || !orgIds?.length) return [];
-  const out = [];
-  for (const org of orgIds) {
-    // 简化版：抓 shares（注意：LinkedIn API 权限限制严格，可能返回403）
-    const url = `https://api.linkedin.com/v2/shares?` + new URLSearchParams({
-      q: "owners",
-      owners: `urn:li:organization:${org}`,
-      sharesPerOwner: "20"
-    }).toString();
-    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` }});
-    if (!resp.ok) continue;
-    const data = await resp.json();
-    const elements = data.elements || [];
-    for (const el of elements) {
-      const created = el.created?.time ? new Date(el.created.time).toISOString() : null;
-      if (created && created < sinceIso) continue;
-      const text = el.text?.text || "";
-      out.push({
-        source: "linkedin_org",
-        title: text.split("\n")[0].slice(0, 100) || "LinkedIn Post",
-        summary: text.slice(0, 300),
-        url: `https://www.linkedin.com/feed/update/${el.activity || ""}`,
-        published_at: created || new Date().toISOString(),
-        location: null
-      });
-    }
-  }
-  return out;
+// The Star Health RSS
+async function fetchFromTheStarHealth() {
+  const url = "https://www.thestar.com.my/rss/health";
+  const rss = await fetchRss(url);
+  return rss.map(r => ({
+    source: "the_star_health",
+    title: r.title,
+    summary: r.description?.slice(0, 300) || "",
+    url: r.link,
+    published_at: r.pubDate,
+    location: "Malaysia"
+  }));
 }
 
-/* ========================= 通用工具 ========================= */
+// Malay Mail Life（含健康）
+async function fetchFromMalayMailLife() {
+  const url = "https://www.malaymail.com/rss?tag=life";
+  const rss = await fetchRss(url);
+  return rss.map(r => ({
+    source: "malay_mail_life",
+    title: r.title,
+    summary: r.description?.slice(0, 300) || "",
+    url: r.link,
+    published_at: r.pubDate,
+    location: "Malaysia"
+  }));
+}
+
+// Meetup 公共 RSS（城市 + 关键字）
+async function fetchFromMeetup({ city = "Kuala Lumpur", keyword = "health" }) {
+  // Meetup RSS 搜索页（公共查询），注意并非所有组合都有结果
+  const url = "https://www.meetup.com/find/events/?" + new URLSearchParams({
+    allMeetups: "true",
+    keywords: keyword,
+    radius: "Infinity",
+    userFreeform: city,
+    format: "rss"
+  }).toString();
+  const rss = await fetchRss(url);
+  return rss.map(r => ({
+    source: "meetup_rss",
+    title: r.title,
+    summary: r.description?.slice(0, 300) || "",
+    url: r.link,
+    published_at: r.pubDate,
+    location: city
+  }));
+}
+
+/* ============================ 通用工具 ============================ */
 
 function isoDaysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString();
+  const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString();
 }
-
 async function fetchRss(url) {
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
   if (!res.ok) throw new Error(`RSS fetch failed ${res.status}`);
   const xml = await res.text();
   return parseRss(xml);
 }
-
 function parseRss(xml) {
   const items = [];
-  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-  let m;
-  while ((m = itemRegex.exec(xml)) !== null) {
+  const itemRegex = /<item>([\\s\\S]*?)<\\/item>/g;
+  let m; while ((m = itemRegex.exec(xml)) !== null) {
     const block = m[1];
     const title = getTag(block, "title");
     const link = getTag(block, "link");
@@ -279,38 +268,32 @@ function parseRss(xml) {
     items.push({
       title: decodeHtml(title || ""),
       link: decodeHtml(link || ""),
-      pubDate: pubDate ? new Date(pubDate).toISOString() : null,
+      pubDate: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
       description: decodeHtml(description || "")
     });
   }
   return items;
 }
-
 function getTag(block, tag) {
-  const r = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i");
+  const r = new RegExp(`<${tag}>([\\\\s\\\\S]*?)<\\/${tag}>`, "i");
   const m = r.exec(block);
   return m ? m[1].trim() : null;
 }
-
 function stripHtml(str) { return str.replace(/<[^>]+>/g, "").trim(); }
 function decodeHtml(str) {
   return str.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
             .replace(/&quot;/g,'"').replace(/&#39;/g,"'");
 }
-
 function daysBetween(iso) {
   if (!iso) return 999;
-  const now = Date.now();
-  const t = new Date(iso).getTime();
+  const now = Date.now(), t = new Date(iso).getTime();
   return Math.floor((now - t) / 86400000);
 }
-
 function countHits(text, kws) {
   const lower = text.toLowerCase();
   let n = 0; for (const k of kws) if (lower.includes(k.toLowerCase())) n++;
   return n;
 }
-
 function scoreItem({ locationMatch, signalsCount, daysAge, kwHits }) {
   const kwScore = Math.min(1, kwHits / 3);
   const geoScore = locationMatch ? 1 : 0.6;
@@ -319,7 +302,6 @@ function scoreItem({ locationMatch, signalsCount, daysAge, kwHits }) {
   const score = 0.5*kwScore + 0.2*geoScore + 0.2*signalScore + 0.1*recency;
   return Number(Math.min(1, score).toFixed(2));
 }
-
 function uniq(arr) { return Array.from(new Set(arr)); }
 function uniqBy(arr, keyFn) {
   const map = new Map();
@@ -329,7 +311,6 @@ function uniqBy(arr, keyFn) {
   }
   return Array.from(map.values());
 }
-
 function guessLocationFromText(text) {
   if (!text) return null;
   const locs = ["Kuala Lumpur","Selangor","Penang","Johor","Malaysia","Singapore"];
